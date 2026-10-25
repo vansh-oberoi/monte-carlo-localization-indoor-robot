@@ -76,6 +76,20 @@ The pose is `(x, y, theta)`; angle values are in radians.
 
 **Important:** report only values produced by your own runs. Performance depends on the map, initialization, sensor model, random seed, and simulation parameters.
 
+## Reproducible experiment comparison
+
+A repeatable experiment runner compares particle counts while holding the map, motion sequence, and noise parameters fixed. It runs each configuration over multiple seeds and writes every trial to CSV.
+
+```bash
+python experiments.py --steps 100 --seeds 11 22 33 --particle-counts 50 100 200 --output outputs/experiments.csv
+```
+
+Recorded metrics include mean, median, final, and 95th-percentile position error, plus runtime. Read [the experiment protocol](docs/EXPERIMENT_PROTOCOL.md) before running and reporting results. The script does not supply prewritten results; use the CSV produced by your own run.
+
+## Continuous integration
+
+GitHub Actions runs the unit tests on Python 3.10, 3.11, and 3.12 for pushes and pull requests. Check the repository's **Actions** tab for the actual run status.
+
 ## Scope and limitations
 
 This is an educational 2D simulation with a known map and simplified motion and LiDAR models. It is not a real-robot navigation stack and does not implement SLAM or ROS integration. Localization may be ambiguous in symmetric environments.
