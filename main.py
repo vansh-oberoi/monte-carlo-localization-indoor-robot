@@ -98,20 +98,26 @@ class MCL:
 
     def step(self, odom, observed):
         dx, dy, dt = odom
-        theta = self.particles[:, 2].copy()
-        dxs = dx+self.rng.normal(0, 0.045, self.n)
-        dys = dy+self.rng.normal(0, 0.045, self.n)
-        dts = dt+self.rng.normal(0, 0.035, self.n)
-        self.particles[:, 0] += dxs*np.cos(theta)-dys*np.sin(theta)
-        self.particles[:, 1] += dxs*np.sin(theta)+dys*np.cos(theta)
-        self.particles[:, 2] = wrap_angle(theta+dts)
-        for p in self.particles:
-            if not self.world.valid(p[0], p[1], 0.08):
-                for _ in range(100):
-                    x, y = self.rng.uniform(0.25, 9.75, 2)
-                    if self.world.valid(x, y, 0.08):
-                        p[0], p[1] = x, y
-                        break
+        # Propose noisy odometry updates from each particle's previous valid pose.
+        # Reject invalid proposals instead of teleporting particles to random map locations.
+        for i in range(self.n):
+            previous = self.particles[i].copy()
+            theta = previous[2]
+            accepted = False
+            for _ in range(10):
+                dx_sample = dx + self.rng.normal(0, 0.045)
+                dy_sample = dy + self.rng.normal(0, 0.045)
+                dt_sample = dt + self.rng.normal(0, 0.035)
+                candidate_x = previous[0] + dx_sample*np.cos(theta) - dy_sample*np.sin(theta)
+                candidate_y = previous[1] + dx_sample*np.sin(theta) + dy_sample*np.cos(theta)
+                candidate_theta = wrap_angle(theta + dt_sample)
+                if self.world.valid(candidate_x, candidate_y, 0.08):
+                    self.particles[i] = [candidate_x, candidate_y, candidate_theta]
+                    accepted = True
+                    break
+            if not accepted:
+                # Keep the previous valid pose if all motion proposals are invalid.
+                self.particles[i] = previous
         logw = np.empty(self.n)
         for i, p in enumerate(self.particles):
             predicted = self.world.raycast(p[0], p[1], p[2]+self.beams, self.max_range)
