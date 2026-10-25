@@ -139,13 +139,26 @@ class MCL:
         self.weights.fill(1/self.n)
         return estimate
 
-def control(step):
-    phase = step % 42
-    if phase < 30:
-        return 0.48, 0.0
-    if phase < 36:
-        return 0.12, 0.62
-    return 0.36, -0.20
+def control(step, scan=None, beams=None):
+    # Reactive obstacle avoidance using the current LiDAR scan.
+    if scan is None or beams is None:
+        return 0.25, 0.0
+
+    front_angles = np.abs(np.arctan2(np.sin(beams), np.cos(beams)))
+    front = scan[front_angles < np.deg2rad(35)]
+
+    if len(front) and np.min(front) < 0.65:
+        # Turn in place when an obstacle is too close ahead.
+        left = scan[(beams > 0) & (beams < np.pi)]
+        right = scan[(beams < 0) & (beams > -np.pi)]
+
+        left_clearance = np.mean(left) if len(left) else 0.0
+        right_clearance = np.mean(right) if len(right) else 0.0
+
+        return 0.0, 0.65 if left_clearance >= right_clearance else -0.65
+
+    return 0.30, 0.0
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -161,7 +174,8 @@ def main():
     mcl = MCL(world, args.particles, np.random.default_rng(args.seed+1), robot.beams, robot.max_range)
     truths, estimates, particles, scans, errors = [], [], [], [], []
     for step in range(args.steps):
-        v, omega = control(step)
+        initial_scan = robot.sense()
+        v, omega = control(step, initial_scan, robot.beams)
         odom = robot.move(v, omega)
         scan = robot.sense()
         estimate = mcl.step(odom, scan)

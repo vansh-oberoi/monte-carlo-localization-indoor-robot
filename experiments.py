@@ -29,14 +29,18 @@ def run_trial(seed, steps, particle_count):
     )
     errors = []
     start = time.perf_counter()
+
     for step in range(steps):
-        v, omega = control(step)
+        initial_scan = robot.sense()
+        v, omega = control(step, initial_scan, robot.beams)
         odometry = robot.move(v, omega)
         observation = robot.sense()
         estimate = mcl.step(odometry, observation)
         errors.append(float(np.linalg.norm(estimate[:2] - robot.pose[:2])))
+
     elapsed = time.perf_counter() - start
-    values = np.asarray(errors, dtype=float)
+    values = np.asarray(errors)
+
     return {
         "seed": seed,
         "steps": steps,
