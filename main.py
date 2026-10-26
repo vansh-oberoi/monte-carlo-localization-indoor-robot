@@ -1,6 +1,8 @@
 """Monte Carlo Localization for a simulated indoor robot.
 
 Run: python main.py --steps 120 --particles 180
+Options: --resampler {systematic,multinomial,stratified} --ess-ratio 0.5
+         --augmented --kidnap-step 50
 """
 import argparse
 import os
@@ -8,8 +10,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
+
 def wrap_angle(a):
     return (a + np.pi) % (2 * np.pi) - np.pi
+
 
 class IndoorMap:
     def __init__(self, width=10.0, height=10.0):
@@ -54,6 +58,7 @@ class IndoorMap:
             ax.add_patch(Rectangle((x1, y1), x2-x1, y2-y1, color="dimgray"))
         ax.grid(alpha=0.15)
 
+
 class Robot:
     def __init__(self, world, rng):
         self.world, self.rng = world, rng
@@ -61,6 +66,7 @@ class Robot:
         self.beams = np.linspace(-np.pi, np.pi, 16, endpoint=False)
         self.max_range = 5.0
         self.lidar_sigma = 0.035
+        self.odom_noise_scale = 1.0  # multiplies true odometry noise (noise sweeps)
 
     def move(self, v, omega, dt=0.18):
         old = self.pose.copy()
@@ -74,27 +80,85 @@ class Robot:
         dx, dy = self.pose[0]-old[0], self.pose[1]-old[1]
         local_dx = dx*np.cos(old[2]) + dy*np.sin(old[2])
         local_dy = -dx*np.sin(old[2]) + dy*np.cos(old[2])
-        return np.array([local_dx+self.rng.normal(0, 0.035),
-                         local_dy+self.rng.normal(0, 0.012),
-                         wrap_angle(self.pose[2]-old[2])+self.rng.normal(0, 0.025)])
+        s = self.odom_noise_scale
+        return np.array([local_dx+self.rng.normal(0, 0.035*s),
+                         local_dy+self.rng.normal(0, 0.012*s),
+                         wrap_angle(self.pose[2]-old[2])+self.rng.normal(0, 0.025*s)])
 
     def sense(self):
         ranges = self.world.raycast(self.pose[0], self.pose[1],
                                     self.pose[2]+self.beams, self.max_range)
         return np.clip(ranges+self.rng.normal(0, self.lidar_sigma, len(ranges)), 0.05, self.max_range)
 
+    def kidnap(self):
+        """Teleport the robot to a random free pose (kidnapped-robot test)."""
+        while True:
+            x = self.rng.uniform(0, self.world.width)
+            y = self.rng.uniform(0, self.world.height)
+            if self.world.valid(x, y, 0.3):
+                self.pose = np.array([x, y, self.rng.uniform(-np.pi, np.pi)])
+                return
+
+
 class MCL:
-    def __init__(self, world, n, rng, beams, max_range, initial=(0.9, 0.9, 0.10)):
+    def __init__(self, world, n, rng, beams, max_range, initial=(0.9, 0.9, 0.10),
+                 resampler="systematic", ess_ratio=None, augmented=False,
+                 alpha_slow=0.05, alpha_fast=0.5, max_inject=0.5, global_init=False):
+        if resampler not in ("systematic", "multinomial", "stratified"):
+            raise ValueError(f"unknown resampler: {resampler}")
         self.world, self.n, self.rng = world, n, rng
         self.beams, self.max_range = beams, max_range
-        self.particles = []
-        while len(self.particles) < n:
-            x, y = rng.normal(initial[0], 0.28), rng.normal(initial[1], 0.28)
-            t = rng.normal(initial[2], 0.22)
-            if world.valid(x, y):
-                self.particles.append([x, y, wrap_angle(t)])
-        self.particles = np.asarray(self.particles)
+        self.resampler, self.ess_ratio = resampler, ess_ratio
+        self.augmented = augmented
+        self.alpha_slow, self.alpha_fast, self.max_inject = alpha_slow, alpha_fast, max_inject
+        self.w_slow = self.w_fast = 0.0
+        self.avg_likelihood, self.n_eff, self.injected = 0.0, float(n), 0
+        if global_init:
+            self.particles = np.array([self._random_pose() for _ in range(n)])
+        else:
+            self.particles = []
+            while len(self.particles) < n:
+                x, y = rng.normal(initial[0], 0.28), rng.normal(initial[1], 0.28)
+                t = rng.normal(initial[2], 0.22)
+                if world.valid(x, y):
+                    self.particles.append([x, y, wrap_angle(t)])
+            self.particles = np.asarray(self.particles)
         self.weights = np.full(n, 1/n)
+
+    def _random_pose(self):
+        while True:
+            x = self.rng.uniform(0, self.world.width)
+            y = self.rng.uniform(0, self.world.height)
+            if self.world.valid(x, y, 0.08):
+                return [x, y, self.rng.uniform(-np.pi, np.pi)]
+
+    def _resample(self):
+        n = self.n
+        if self.resampler == "multinomial":
+            positions = self.rng.random(n)
+        elif self.resampler == "stratified":
+            positions = (self.rng.random(n)+np.arange(n))/n
+        else:  # systematic
+            positions = (self.rng.random()+np.arange(n))/n
+        cumulative = np.cumsum(self.weights)
+        cumulative[-1] = 1.0
+        self.particles = self.particles[np.searchsorted(cumulative, positions)].copy()
+        self.weights.fill(1/n)
+
+    def _update_averages(self):
+        """Augmented MCL (Thrun et al., Probabilistic Robotics): returns injection probability."""
+        w = self.avg_likelihood
+        if self.w_slow == 0.0:
+            self.w_slow = self.w_fast = w
+        self.w_slow += self.alpha_slow*(w-self.w_slow)
+        self.w_fast += self.alpha_fast*(w-self.w_fast)
+        return min(self.max_inject, max(0.0, 1.0-self.w_fast/max(self.w_slow, 1e-12)))
+
+    def _inject_random(self, p_random):
+        mask = self.rng.random(self.n) < p_random
+        for i in np.flatnonzero(mask):
+            self.particles[i] = self._random_pose()
+        self.injected = int(mask.sum())
 
     def step(self, odom, observed):
         dx, dy, dt = odom
@@ -123,21 +187,25 @@ class MCL:
             predicted = self.world.raycast(p[0], p[1], p[2]+self.beams, self.max_range)
             residual = np.clip(observed-predicted, -2.5, 2.5)
             logw[i] = -0.5*np.mean((residual/0.32)**2)
+        self.avg_likelihood = float(np.exp(logw).mean())  # raw likelihood, before normalising
         logw -= np.max(logw)
-        w = np.exp(np.clip(logw, -60, 0))+1e-12
+        # Multiply by prior weights (equal to 1/n right after any resampling step).
+        w = self.weights*np.exp(np.clip(logw, -60, 0)) + 1e-12
         self.weights = w/w.sum()
         x = np.sum(self.weights*self.particles[:, 0])
         y = np.sum(self.weights*self.particles[:, 1])
         s = np.sum(self.weights*np.sin(self.particles[:, 2]))
         c = np.sum(self.weights*np.cos(self.particles[:, 2]))
         estimate = np.array([x, y, np.arctan2(s, c)])
-        # Systematic resampling
-        positions = (self.rng.random()+np.arange(self.n))/self.n
-        cumulative = np.cumsum(self.weights); cumulative[-1] = 1.0
-        indices = np.searchsorted(cumulative, positions)
-        self.particles = self.particles[indices].copy()
-        self.weights.fill(1/self.n)
+        self.n_eff = float(1.0/np.sum(self.weights**2))
+        p_random = self._update_averages() if self.augmented else 0.0
+        self.injected = 0
+        if self.ess_ratio is None or self.n_eff < self.ess_ratio*self.n:
+            self._resample()
+            if p_random > 0:
+                self._inject_random(p_random)
         return estimate
+
 
 def control(step, scan=None, beams=None):
     # Reactive obstacle avoidance using the current LiDAR scan.
@@ -166,17 +234,28 @@ def main():
     parser.add_argument("--particles", type=int, default=180)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default="outputs")
+    parser.add_argument("--resampler", choices=["systematic", "multinomial", "stratified"],
+                        default="systematic")
+    parser.add_argument("--ess-ratio", type=float, default=None,
+                        help="resample only when N_eff < ratio * N (e.g. 0.5)")
+    parser.add_argument("--augmented", action="store_true",
+                        help="augmented MCL: inject random particles when likelihood drops")
+    parser.add_argument("--kidnap-step", type=int, default=None,
+                        help="teleport the robot at this step to test recovery")
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
     rng = np.random.default_rng(args.seed)
     world = IndoorMap()
     robot = Robot(world, rng)
-    mcl = MCL(world, args.particles, np.random.default_rng(args.seed+1), robot.beams, robot.max_range)
+    mcl = MCL(world, args.particles, np.random.default_rng(args.seed+1), robot.beams, robot.max_range,
+              resampler=args.resampler, ess_ratio=args.ess_ratio, augmented=args.augmented)
     truths, estimates, particles, scans, errors = [], [], [], [], []
     for step in range(args.steps):
         initial_scan = robot.sense()
         v, omega = control(step, initial_scan, robot.beams)
         odom = robot.move(v, omega)
+        if args.kidnap_step is not None and step == args.kidnap_step:
+            robot.kidnap()
         scan = robot.sense()
         estimate = mcl.step(odom, scan)
         truths.append(robot.pose.copy()); estimates.append(estimate.copy())
@@ -199,9 +278,13 @@ def main():
     est_dot, = ax.plot([], [], "rx", markersize=9, label="Estimated pose")
     rays = [ax.plot([], [], color="green", alpha=0.25, linewidth=0.8)[0] for _ in robot.beams]
     err_ax.plot(np.arange(1, args.steps+1), errors)
+    if args.kidnap_step is not None:
+        err_ax.axvline(args.kidnap_step+1, color="r", linestyle=":", label="kidnap")
+        err_ax.legend(fontsize=8)
     err_ax.set(xlabel="Step", ylabel="Position error (m)", title="Localization error")
     err_ax.grid(alpha=0.3)
     ax.legend(fontsize=8, loc="upper left")
+
     def update(k):
         pts.set_offsets(particles[k][:, :2])
         true_line.set_data(truths[:k+1, 0], truths[:k+1, 1])
@@ -213,10 +296,12 @@ def main():
             line.set_data([truths[k, 0], truths[k, 0]+scans[k, j]*np.cos(a)],
                           [truths[k, 1], truths[k, 1]+scans[k, j]*np.sin(a)])
         return [pts, true_line, est_line, true_dot, est_dot, *rays]
+
     animation = FuncAnimation(fig, update, frames=args.steps, interval=65, blit=False, repeat=False)
     fig.tight_layout()
     fig.savefig(os.path.join(args.output, "localization_snapshot.png"), dpi=150)
     plt.show()
+
 
 if __name__ == "__main__":
     main()
