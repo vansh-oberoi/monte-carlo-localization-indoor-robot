@@ -30,6 +30,25 @@ class TestResamplers(unittest.TestCase):
         est = mcl.step(robot.move(0.3, 0.0), robot.sense())
         self.assertTrue(np.all(np.isfinite(est)))
 
+    def test_augmented_mcl_injects_valid_particles_after_likelihood_drop(self):
+        world, robot, mcl = make(augmented=True)
+
+        mcl.w_slow = 1.0
+        mcl.w_fast = 1.0
+        mcl.avg_likelihood = 0.01
+
+        p_random = mcl._update_averages()
+
+        self.assertGreater(p_random, 0.0)
+        self.assertLessEqual(p_random, mcl.max_inject)
+
+        mcl._inject_random(p_random)
+
+        self.assertGreater(mcl.injected, 0)
+        self.assertEqual(mcl.particles.shape, (mcl.n, 3))
+        self.assertTrue(all(world.valid(p[0], p[1], 0.08) for p in mcl.particles))
+        self.assertAlmostEqual(mcl.weights.sum(), 1.0)
+
     def test_ess_resampling_keeps_weights_normalised(self):
         world, robot, mcl = make(ess_ratio=0.5)
         for _ in range(3):
