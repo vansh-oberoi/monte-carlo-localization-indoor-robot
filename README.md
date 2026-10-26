@@ -8,6 +8,9 @@ A classroom project implementing Monte Carlo Localization (MCL) for a simulated 
 - Simulated robot movement and noisy odometry
 - Simulated 2D LiDAR using ray casting
 - Particle-filter localization: prediction, measurement weighting, and resampling
+- Systematic, multinomial, and stratified resampling, with optional ESS-based resampling
+- Augmented MCL with random-particle injection for kidnapped-robot recovery experiments
+- Repeatable multi-seed experiments with position-error, recovery, and runtime metrics
 - Visualization of the map, particles, true pose, estimated pose, LiDAR rays, and trajectory
 - Position-error plot and CSV experiment output
 
@@ -46,7 +49,7 @@ Close the animation window after viewing. The program saves plots and a summary 
 Run the basic tests:
 
 ```bash
-python -m unittest
+python -m unittest discover -s tests -v
 ```
 
 ## How MCL works
@@ -64,7 +67,10 @@ The pose is `(x, y, theta)`; angle values are in radians.
 
 - `main.py` — simulation and visualization
 - `requirements.txt` — Python dependencies
-- `tests/test_smoke.py` — basic correctness checks
+- `experiments.py` — repeatable experiments and CSV metrics
+- `tests/test_smoke.py` — basic simulation correctness checks
+- `tests/test_resamplers.py` — resampling, augmented MCL, and particle validity tests
+- `tests/test_recovery.py` — recovery-metric behavior and input validation tests
 - `REPORT_OUTLINE.md` — report-writing guide
 
 ## Experiments to report
