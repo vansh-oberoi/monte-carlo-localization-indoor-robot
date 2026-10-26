@@ -26,7 +26,18 @@ METHODS = {
 
 
 def recovery_steps(errors, ref, threshold=0.5, hold=5):
-    """Steps after `ref` until error stays below threshold for `hold` steps (NaN if never)."""
+    """Return steps to sustained recovery, or NaN if recovery never occurs."""
+    if not isinstance(ref, (int, np.integer)) or isinstance(ref, (bool, np.bool_)) or ref < 0:
+        raise ValueError("ref must be a non-negative integer")
+    if not isinstance(hold, (int, np.integer)) or isinstance(hold, (bool, np.bool_)) or hold <= 0:
+        raise ValueError("hold must be a positive integer")
+
+    errors = np.asarray(errors)
+    if errors.ndim != 1:
+        raise ValueError("errors must be a one-dimensional array")
+    if ref >= len(errors):
+        return float("nan")
+
     below = errors[ref:] < threshold
     for i in range(len(below) - hold + 1):
         if below[i:i + hold].all():
