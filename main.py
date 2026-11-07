@@ -216,25 +216,34 @@ class MCL:
         return estimate
 
 
-def control(step, scan=None, beams=None):
-    # Reactive obstacle avoidance using the current LiDAR scan.
-    if scan is None or beams is None:
-        return 0.25, 0.0
+WAYPOINTS = np.array([[1.0, 1.0], [1.0, 6.8], [1.7, 6.8], [1.7, 1.0]], dtype=float)
 
-    front_angles = np.abs(np.arctan2(np.sin(beams), np.cos(beams)))
-    front = scan[front_angles < np.deg2rad(35)]
 
-    if len(front) and np.min(front) < 0.65:
-        # Turn in place when an obstacle is too close ahead.
-        left = scan[(beams > 0) & (beams < np.pi)]
-        right = scan[(beams < 0) & (beams > -np.pi)]
+def control(pose, scan=None, beams=None, waypoint_index=0):
+    """Follow a four-waypoint patrol loop with reactive front-obstacle avoidance."""
+    target = WAYPOINTS[waypoint_index]
+    delta = target - pose[:2]
+    if np.linalg.norm(delta) < 0.30:
+        waypoint_index = (waypoint_index + 1) % len(WAYPOINTS)
+        target = WAYPOINTS[waypoint_index]
+        delta = target - pose[:2]
 
-        left_clearance = np.mean(left) if len(left) else 0.0
-        right_clearance = np.mean(right) if len(right) else 0.0
+    desired_heading = np.arctan2(delta[1], delta[0])
+    heading_error = wrap_angle(desired_heading - pose[2])
+    omega = float(np.clip(1.8 * heading_error, -0.9, 0.9))
+    v = 0.22 if abs(heading_error) > 0.55 else 0.30
 
-        return 0.0, 0.65 if left_clearance >= right_clearance else -0.65
+    if scan is not None and beams is not None:
+        front_angles = np.abs(np.arctan2(np.sin(beams), np.cos(beams)))
+        front = scan[front_angles < np.deg2rad(35)]
+        if len(front) and np.min(front) < 0.65:
+            left = scan[(beams > 0) & (beams < np.pi)]
+            right = scan[(beams < 0) & (beams > -np.pi)]
+            left_clearance = np.mean(left) if len(left) else 0.0
+            right_clearance = np.mean(right) if len(right) else 0.0
+            return 0.0, 0.65 if left_clearance >= right_clearance else -0.65, waypoint_index
 
-    return 0.30, 0.0
+    return v, omega, waypoint_index
 
 
 def main():
@@ -259,9 +268,10 @@ def main():
     mcl = MCL(world, args.particles, np.random.default_rng(args.seed+1), robot.beams, robot.max_range,
               resampler=args.resampler, ess_ratio=args.ess_ratio, augmented=args.augmented)
     truths, estimates, particles, scans, errors = [], [], [], [], []
+    waypoint_index = 0
     for step in range(args.steps):
         initial_scan = robot.sense()
-        v, omega = control(step, initial_scan, robot.beams)
+        v, omega, waypoint_index = control(robot.pose, initial_scan, robot.beams, waypoint_index)
         odom = robot.move(v, omega)
         if args.kidnap_step is not None and step == args.kidnap_step:
             robot.kidnap()
@@ -274,10 +284,11 @@ def main():
     print(f"Steps: {args.steps}; particles: {args.particles}")
     print(f"Mean position error: {errors.mean():.4f} m")
     print(f"Final position error: {errors[-1]:.4f} m")
+    heading_errors_deg = np.abs(np.degrees(wrap_angle(estimates[:, 2] - truths[:, 2])))
     np.savetxt(os.path.join(args.output, "position_errors.csv"),
-               np.c_[np.arange(1, args.steps+1), errors], delimiter=",",
-               header="step,position_error_m", comments="")
-    fig, (ax, err_ax) = plt.subplots(1, 2, figsize=(13, 6))
+               np.c_[np.arange(1, args.steps+1), errors, heading_errors_deg], delimiter=",",
+               header="step,position_error_m,heading_error_deg", comments="")
+    fig, (ax, err_ax, heading_ax) = plt.subplots(1, 3, figsize=(17, 6))
     world.draw(ax)
     ax.set_title("Monte Carlo Localization")
     pts = ax.scatter([], [], s=8, alpha=0.35, label="Particles")
@@ -289,9 +300,13 @@ def main():
     err_ax.plot(np.arange(1, args.steps+1), errors)
     if args.kidnap_step is not None:
         err_ax.axvline(args.kidnap_step+1, color="r", linestyle=":", label="kidnap")
+        heading_ax.axvline(args.kidnap_step+1, color="r", linestyle=":")
         err_ax.legend(fontsize=8)
-    err_ax.set(xlabel="Step", ylabel="Position error (m)", title="Localization error")
+    err_ax.set(xlabel="Step", ylabel="Position error (m)", title="Position error")
     err_ax.grid(alpha=0.3)
+    heading_ax.plot(np.arange(1, args.steps+1), heading_errors_deg, color="tab:orange")
+    heading_ax.set(xlabel="Step", ylabel="Absolute heading error (degrees)", title="Heading error")
+    heading_ax.grid(alpha=0.3)
     ax.legend(fontsize=8, loc="upper left")
 
     def update(k):
