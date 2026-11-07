@@ -11,8 +11,11 @@ A classroom project implementing Monte Carlo Localization (MCL) for a simulated 
 - Systematic, multinomial, and stratified resampling, with optional ESS-based resampling
 - Augmented MCL with random-particle injection for kidnapped-robot recovery experiments
 - Repeatable multi-seed experiments with position-error, recovery, and runtime metrics
+- Four-waypoint patrol loop with reactive LiDAR obstacle avoidance
+- Motion-model proposal noise scaled to observed translation and rotation
+- Pose estimate from the highest-weight 15% of particles, with a free-space fallback
 - Visualization of the map, particles, true pose, estimated pose, LiDAR rays, and trajectory
-- Position-error plot and CSV experiment output
+- Position- and heading-error plots plus CSV experiment output
 
 ## Requirements
 
@@ -90,7 +93,11 @@ A repeatable experiment runner compares particle counts while holding the map, m
 python experiments.py --steps 100 --seeds 11 22 33 --particle-counts 50 100 200 --output outputs/experiments.csv
 ```
 
-Recorded metrics include mean, median, final, and 95th-percentile position error, plus runtime. Read [the experiment protocol](docs/EXPERIMENT_PROTOCOL.md) before running and reporting results. The script does not supply prewritten results; use the CSV produced by your own run.
+Recorded metrics include mean, median, final, and 95th-percentile position error; mean, final, and 95th-percentile heading error; recovery steps; and runtime. Read [the experiment protocol](docs/EXPERIMENT_PROTOCOL.md) before running and reporting results. The script does not supply prewritten results; use the CSV produced by your own run.
+
+## Recorded kidnapped-robot results
+
+See [the experiment results report](docs/EXPERIMENT_RESULTS.md) for the reproducible 15-seed comparison of systematic and augmented MCL at 100 and 300 particles, including position error, sustained recovery, heading recovery, commands, and limitations. The report distinguishes observed simulation outcomes from general performance claims; generated CSV files remain local experiment outputs.
 
 ## Continuous integration
 

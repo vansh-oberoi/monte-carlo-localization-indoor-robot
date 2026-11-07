@@ -45,6 +45,17 @@ def recovery_steps(errors, ref, threshold=0.5, hold=5):
     return float("nan")
 
 
+
+def sustained_recovery_steps(errors, ref, threshold=0.5, hold=20):
+    """Return steps until position error stays below threshold for 20 steps."""
+    return recovery_steps(errors, ref, threshold=threshold, hold=hold)
+
+
+def heading_recovery_steps(errors_deg, ref, threshold=15.0, hold=20):
+    """Return steps until absolute heading error stays below 15 degrees for 20 steps."""
+    return recovery_steps(errors_deg, ref, threshold=threshold, hold=hold)
+
+
 def run_trial(seed, steps, particle_count, method="systematic", scenario="tracking",
               kidnap_step=50, lidar_sigma=0.035, odom_scale=1.0):
     """Run one trial and return measured error/runtime statistics."""
@@ -62,20 +73,24 @@ def run_trial(seed, steps, particle_count, method="systematic", scenario="tracki
         **METHODS[method],
     )
     errors = []
+    heading_errors = []
+    waypoint_index = 0
     start = time.perf_counter()
 
     for step in range(steps):
         initial_scan = robot.sense()
-        v, omega = control(step, initial_scan, robot.beams)
+        v, omega, waypoint_index = control(robot.pose, initial_scan, robot.beams, waypoint_index)
         odometry = robot.move(v, omega)
         if scenario == "kidnap" and step == kidnap_step:
             robot.kidnap()
         observation = robot.sense()
         estimate = mcl.step(odometry, observation)
         errors.append(float(np.linalg.norm(estimate[:2] - robot.pose[:2])))
+        heading_errors.append(float(abs(np.degrees((estimate[2] - robot.pose[2] + np.pi) % (2*np.pi) - np.pi))))
 
     elapsed = time.perf_counter() - start
     values = np.asarray(errors)
+    heading_values = np.asarray(heading_errors)
     ref = {"kidnap": kidnap_step, "global": 0}.get(scenario)
 
     return {
@@ -90,7 +105,20 @@ def run_trial(seed, steps, particle_count, method="systematic", scenario="tracki
         "median_position_error_m": float(np.median(values)),
         "final_position_error_m": float(values[-1]),
         "p95_position_error_m": float(np.percentile(values, 95)),
+        "mean_heading_error_deg": float(heading_values.mean()),
+        "final_heading_error_deg": float(heading_values[-1]),
+        "p95_heading_error_deg": float(np.percentile(heading_values, 95)),
         "recovery_steps": recovery_steps(values, ref) if ref is not None else float("nan"),
+        "sustained_recovery_steps": sustained_recovery_steps(values, ref) if ref is not None else float("nan"),
+        "heading_recovery_steps": heading_recovery_steps(heading_values, ref) if ref is not None else float("nan"),
+        "post_recovery_mean_position_error_m": (
+            float(values[int(sustained_recovery_steps(values, ref)) + ref:].mean())
+            if ref is not None and np.isfinite(sustained_recovery_steps(values, ref)) else float("nan")
+        ),
+        "post_recovery_mean_heading_error_deg": (
+            float(heading_values[int(heading_recovery_steps(heading_values, ref)) + ref:].mean())
+            if ref is not None and np.isfinite(heading_recovery_steps(heading_values, ref)) else float("nan")
+        ),
         "runtime_seconds": float(elapsed),
     }
 
