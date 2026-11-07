@@ -164,14 +164,15 @@ class MCL:
         dx, dy, dt = odom
         # Propose noisy odometry updates from each particle's previous valid pose.
         # Reject invalid proposals instead of teleporting particles to random map locations.
+        distance = float(np.hypot(dx, dy))
         for i in range(self.n):
             previous = self.particles[i].copy()
             theta = previous[2]
             accepted = False
             for _ in range(10):
-                dx_sample = dx + self.rng.normal(0, 0.045)
-                dy_sample = dy + self.rng.normal(0, 0.045)
-                dt_sample = dt + self.rng.normal(0, 0.035)
+                dx_sample = dx + self.rng.normal(0, 0.15 * distance)
+                dy_sample = dy + self.rng.normal(0, 0.12 * distance)
+                dt_sample = dt + self.rng.normal(0, 0.12 * abs(dt) + 0.02 * distance)
                 candidate_x = previous[0] + dx_sample*np.cos(theta) - dy_sample*np.sin(theta)
                 candidate_y = previous[1] + dx_sample*np.sin(theta) + dy_sample*np.cos(theta)
                 candidate_theta = wrap_angle(theta + dt_sample)
@@ -192,11 +193,19 @@ class MCL:
         # Multiply by prior weights (equal to 1/n right after any resampling step).
         w = self.weights*np.exp(np.clip(logw, -60, 0)) + 1e-12
         self.weights = w/w.sum()
-        x = np.sum(self.weights*self.particles[:, 0])
-        y = np.sum(self.weights*self.particles[:, 1])
-        s = np.sum(self.weights*np.sin(self.particles[:, 2]))
-        c = np.sum(self.weights*np.cos(self.particles[:, 2]))
-        estimate = np.array([x, y, np.arctan2(s, c)])
+        elite_count = max(1, int(np.ceil(0.15 * self.n)))
+        elite_idx = np.argpartition(self.weights, -elite_count)[-elite_count:]
+        elite_weights = self.weights[elite_idx].copy()
+        elite_weights /= elite_weights.sum()
+        elite = self.particles[elite_idx]
+        x = float(np.sum(elite_weights * elite[:, 0]))
+        y = float(np.sum(elite_weights * elite[:, 1]))
+        s = np.sum(elite_weights * np.sin(elite[:, 2]))
+        c = np.sum(elite_weights * np.cos(elite[:, 2]))
+        theta = float(np.arctan2(s, c))
+        if not self.world.valid(x, y, margin=0.0):
+            x, y, theta = map(float, self.particles[int(np.argmax(self.weights))])
+        estimate = np.array([x, y, theta])
         self.n_eff = float(1.0/np.sum(self.weights**2))
         p_random = self._update_averages() if self.augmented else 0.0
         self.injected = 0
