@@ -95,6 +95,10 @@ python experiments.py --steps 100 --seeds 11 22 33 --particle-counts 50 100 200 
 
 Recorded metrics include mean, median, final, and 95th-percentile position error; mean, final, and 95th-percentile heading error; recovery steps; and runtime. Read [the experiment protocol](docs/EXPERIMENT_PROTOCOL.md) before running and reporting results. The script does not supply prewritten results; use the CSV produced by your own run.
 
+## Recorded kidnapped-robot results
+
+See [the experiment results report](docs/EXPERIMENT_RESULTS.md) for the reproducible 15-seed comparison of systematic and augmented MCL at 100 and 300 particles, including position error, sustained recovery, heading recovery, commands, and limitations. The report distinguishes observed simulation outcomes from general performance claims; generated CSV files remain local experiment outputs.
+
 ## Continuous integration
 
 GitHub Actions runs the unit tests on Python 3.10, 3.11, and 3.12 for pushes and pull requests. Check the repository's **Actions** tab for the actual run status.
