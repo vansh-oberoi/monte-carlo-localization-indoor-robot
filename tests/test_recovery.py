@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from experiments import recovery_steps
+from experiments import recovery_steps, sustained_recovery_steps, heading_recovery_steps
 
 
 class TestRecoverySteps(unittest.TestCase):
@@ -39,6 +39,18 @@ class TestRecoverySteps(unittest.TestCase):
 
     def test_reference_beyond_array_returns_nan(self):
         self.assertTrue(np.isnan(recovery_steps(np.array([0.1, 0.2]), ref=5, hold=1)))
+
+    def test_sustained_recovery_requires_twenty_consecutive_steps(self):
+        errors = np.array([2.0] + [0.2] * 10 + [0.8] + [0.2] * 20)
+        self.assertEqual(sustained_recovery_steps(errors, ref=0), 12.0)
+
+    def test_heading_recovery_uses_degree_threshold(self):
+        errors = np.array([90.0] + [5.0] * 20)
+        self.assertEqual(heading_recovery_steps(errors, ref=0), 1.0)
+
+    def test_sustained_recovery_fails_if_window_is_interrupted(self):
+        errors = np.array([2.0] + [0.2] * 19 + [0.8] + [0.2] * 10)
+        self.assertTrue(np.isnan(sustained_recovery_steps(errors, ref=0)))
 
 
 if __name__ == "__main__":
