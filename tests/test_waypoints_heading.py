@@ -31,6 +31,10 @@ class TestWaypointAndPoseMetrics(unittest.TestCase):
         self.assertIn("mean_heading_error_deg", result)
         self.assertIn("final_heading_error_deg", result)
         self.assertIn("p95_heading_error_deg", result)
+        self.assertIn("sustained_recovery_steps", result)
+        self.assertIn("heading_recovery_steps", result)
+        self.assertIn("post_recovery_mean_position_error_m", result)
+        self.assertIn("post_recovery_mean_heading_error_deg", result)
         self.assertGreaterEqual(result["mean_heading_error_deg"], 0.0)
         self.assertLessEqual(result["p95_heading_error_deg"], 180.0)
 
