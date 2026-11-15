@@ -145,6 +145,68 @@ def plot_metric(rows: list[dict], x_key: str, group_key: str | None,
     plt.close(fig)
 
 
+def plot_recovery_metrics(rows: list[dict], x_key: str, group_key: str | None,
+                         output: Path, title: str, x_label: str) -> None:
+    """Plot recovery success rate and conditional recovery time.
+
+    A trial succeeds for a criterion only when its corresponding recovery
+    step is finite. Mean recovery time is calculated among successful trials
+    only; unsuccessful trials are not assigned an artificial time.
+    """
+    criteria = (
+        ("recovery_steps", "Initial position (5-step hold)"),
+        ("sustained_recovery_steps", "Sustained position (20-step hold)"),
+        ("heading_recovery_steps", "Heading (20-step hold)"),
+    )
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        series = str(row.get(group_key, "all")) if group_key else "all"
+        x_value = str(row[x_key])
+        grouped.setdefault((series, x_value), []).append(row)
+
+    series_names = sorted({key[0] for key in grouped})
+    x_values = sorted(
+        {key[1] for key in grouped},
+        key=lambda value: float(value) if _is_number(value) else value,
+    )
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    for col, (metric, criterion_label) in enumerate(criteria):
+        for series in series_names:
+            rates = []
+            times = []
+            for x_value in x_values:
+                trials = grouped.get((series, x_value), [])
+                recovered = []
+                for trial in trials:
+                    raw = trial.get(metric, "")
+                    try:
+                        value = float(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(value):
+                        recovered.append(value)
+                rates.append(100.0 * len(recovered) / len(trials) if trials else float("nan"))
+                times.append(mean(recovered) if recovered else float("nan"))
+            xs = list(range(len(x_values)))
+            label = series if group_key else None
+            axes[0, col].plot(xs, rates, marker="o", label=label)
+            axes[1, col].plot(xs, times, marker="o", label=label)
+        axes[0, col].set_title(criterion_label)
+        axes[0, col].set_ylabel("Successful trials (%)")
+        axes[0, col].set_ylim(0, 105)
+        axes[1, col].set_ylabel("Mean steps among successes")
+        for row_index in range(2):
+            axes[row_index, col].set_xticks(range(len(x_values)), x_values)
+            axes[row_index, col].set_xlabel(x_label)
+            axes[row_index, col].grid(True, alpha=0.25)
+        if group_key and len(series_names) > 1:
+            axes[0, col].legend(title=group_key)
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(output, dpi=220)
+    plt.close(fig)
+
+
 def _is_number(value: str) -> bool:
     try:
         float(value)
@@ -221,8 +283,30 @@ def main() -> int:
                            "Odometry noise scale", "Mean position error (m)"),
     }
     for label, rows in loaded.items():
-        x, group, title, xlabel, ylabel = plot_specs[label]
-        plot_metric(rows, x, group, out / f"{label}.png", title, xlabel, ylabel)
+        if label.startswith("e6_"):
+            particle_count = "100" if label.endswith("100") else "300"
+            plot_recovery_metrics(
+                rows, "method", None,
+                out / f"{label}_recovery.png",
+                f"Kidnapped-robot recovery ({particle_count} particles)",
+                "Method",
+            )
+            plot_metric(rows, "seed", "method", out / f"{label}_position_error.png",
+                        f"Whole-trial position error ({particle_count} particles)",
+                        "Seed", "Mean position error (m)")
+        elif label.startswith("e7_"):
+            x_key = "lidar_sigma" if label == "e7_kidnap_lidar" else "odom_scale"
+            x_label = "LiDAR sigma (m)" if label == "e7_kidnap_lidar" else "Odometry noise scale"
+            plot_recovery_metrics(
+                rows, x_key, "method", out / f"{label}_recovery.png",
+                "Kidnapped-robot recovery under sensor noise", x_label,
+            )
+            plot_metric(rows, x_key, "method", out / f"{label}_position_error.png",
+                        "Whole-trial position error under sensor noise",
+                        x_label, "Mean position error (m)")
+        else:
+            x, group, title, xlabel, ylabel = plot_specs[label]
+            plot_metric(rows, x, group, out / f"{label}.png", title, xlabel, ylabel)
 
     print("\nGenerated summaries and figures only from the CSVs listed above.")
     if missing:
