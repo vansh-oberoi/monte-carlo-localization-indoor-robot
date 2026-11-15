@@ -52,8 +52,8 @@ CSVs alongside the generated summaries when archiving a report run.
 
 ## E1 trajectory figures (Figures 5 and 6)
 
-The E1 figures are generated separately because they require per-step states
-rather than per-trial aggregates. Run from the repository root:
+The E1 figures are generated separately because they require per-step states.
+Run from the repository root:
 
 ```bash
 python e1_report_figures.py
@@ -67,10 +67,42 @@ and six per-step trace CSVs under `outputs/`.
 
 The script uses the same deterministic RNG streams as `experiments.run_trial`
 (robot seed = seed; particle-filter seed = seed + 1,000,003), and uses the
-current `main.py` simulator, controller and filter implementation. These
-figures should be checked against the report after regeneration; do not treat
-visual similarity alone as proof that older, separately generated figures
-used the same RNG stream.
+current `main.py` simulator, controller and filter implementation.
+
+### E1 numerical validation and aggregation
+
+After generating the traces, run the validation script:
+
+```bash
+python e1_validate.py
+```
+
+It checks the five N=100 traces (seeds 11, 22, 33, 44, 55) against the E1
+values reported in the report and creates `outputs/e1_validation_package.zip`.
+The package contains Figure 5, Figure 6, all six E1 traces (including seed 11,
+N=200), per-seed metrics and the report comparison table.
+
+The report's displayed E1 statistics are reproduced by first calculating
+statistics independently for each of the five N=100 runs, then aggregating
+those run-level values as follows:
+
+- Mean position error: arithmetic mean of the five per-run mean position errors.
+- Median position error: median of the five per-run mean position errors.
+- P95 position error: arithmetic mean of the five per-run 95th-percentile position errors.
+- Mean heading error: arithmetic mean of the five per-run mean heading errors.
+
+The validated values from the regenerated traces are 0.204348 m (mean
+position error), 0.165737 m (median of per-run mean position errors), 0.401643 m
+(mean per-run P95 position error), and 3.607554 degrees (mean heading error).
+These round to the report's displayed values: 0.204 m, 0.166 m, 0.402 m and
+3.6 degrees, respectively.
+
+These are run-level aggregate definitions; they are not the same as pooling
+all 1,250 time-step observations and calculating a single median or P95.
+Preserve this distinction when reporting or interpreting the metrics. The
+validation establishes consistency for the regenerated traces and current
+code; it does not by itself prove that any historical figure or trace was
+generated with the same code and random-number streams.
 
 ## Reproduction record
 
