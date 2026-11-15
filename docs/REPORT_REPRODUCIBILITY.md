@@ -45,7 +45,21 @@ For each input, the script writes:
 
 - `outputs/<experiment>_summary.csv`: per-setting mean, sample standard
   deviation, median, trial count, and recovery summaries where applicable.
-- `outputs/<experiment>.png`: an error-bar comparison plot.
+- `outputs/<experiment>.png`: an error-bar comparison plot for E2–E5.
+- For E6 and E7, `outputs/<experiment>_recovery.png`: recovery success-rate
+  and conditional mean recovery-time plots for initial position, sustained
+  position, and heading criteria. The corresponding
+  `outputs/<experiment>_position_error.png` retains whole-trial mean position
+  error as a complementary diagnostic, not as the recovery measure.
+
+A trial counts as successful for a recovery criterion only when its recorded
+recovery step is finite. Mean recovery time is calculated only among trials
+that meet that criterion; unsuccessful trials are not assigned a synthetic
+recovery time. Success rates use all trials in the relevant setting as the
+denominator. The criteria are initial position error below 0.5 m for 5
+consecutive samples, sustained position error below 0.5 m for 20 consecutive
+samples, and absolute heading error below 15 degrees for 20 consecutive
+samples after kidnapping.
 
 These outputs are derived from the corresponding raw trial CSVs. Keep the raw
 CSVs alongside the generated summaries when archiving a report run.
