@@ -50,15 +50,27 @@ For each input, the script writes:
 These outputs are derived from the corresponding raw trial CSVs. Keep the raw
 CSVs alongside the generated summaries when archiving a report run.
 
-## Important scope limitation
+## E1 trajectory figures (Figures 5 and 6)
 
-This generator covers the aggregate experiment comparisons E2–E7. It does not
-recreate the trajectory illustration or per-time-step tracking-error plot
-(Figures 5 and 6 in the current report), because the current experiment runner
-writes per-trial aggregates rather than full per-step trajectories. Those
-figures must continue to use their original verified source data, or the
-experiment runner must be extended to export per-step traces before they can
-be regenerated automatically.
+The E1 figures are generated separately because they require per-step states
+rather than per-trial aggregates. Run from the repository root:
+
+```bash
+python e1_report_figures.py
+```
+
+The script reproduces Figure 5 for seed 11 with 200 particles, including the
+particle clouds at steps 1, 125 and 250. It reproduces Figure 6 for five seeds
+(11, 22, 33, 44, 55) with 100 particles and plots the per-step position and
+absolute heading errors with their across-seed median. It writes the figures
+and six per-step trace CSVs under `outputs/`.
+
+The script uses the same deterministic RNG streams as `experiments.run_trial`
+(robot seed = seed; particle-filter seed = seed + 1,000,003), and uses the
+current `main.py` simulator, controller and filter implementation. These
+figures should be checked against the report after regeneration; do not treat
+visual similarity alone as proof that older, separately generated figures
+used the same RNG stream.
 
 ## Reproduction record
 
